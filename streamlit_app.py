@@ -61,7 +61,7 @@ DB_RATES = {
 # ==========================================
 # ⚙️ [ส่วนที่ 2] ระบบหลังบ้าน (DB & Login)
 # ==========================================
-st.set_page_config(page_title="KK-Team Pro V17", layout="wide")
+st.set_page_config(page_title="KK-Team No.1", layout="wide")
 DB_FILE = "kkteam_pro_v15.db"
 
 def get_conn(): return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -195,6 +195,3 @@ st.divider()
 st.subheader("📊 ประวัติสินค้าที่เคยบันทึก")
 st.dataframe(pd.read_sql("SELECT * FROM products ORDER BY code DESC", get_conn()), use_container_width=True, hide_index=True)
 # 📊 แสดงฐานข้อมูล
-st.divider()
-st.subheader("📊 ประวัติสินค้าที่เคยบันทึก")
-st.dataframe(pd.read_sql("SELECT * FROM products ORDER BY code DESC", get_conn()), use_container_width=True, hide_index=True)
