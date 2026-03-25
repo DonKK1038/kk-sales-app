@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # ==========================================
-# 📊 [ส่วนที่ 1] ศูนย์รวมเรทราคา (ห้ามยุ่ง - คงไว้ตามที่คุณดนย์แก้ไข)
+# 📊 [ส่วนที่ 1] ศูนย์รวมเรทราคา (ห้ามยุ่ง - ข้อมูลตามที่คุณดนย์ตั้งไว้)
 # ==========================================
 DB_RATES = {
     "1. LAN (UTP)": {
@@ -59,9 +59,9 @@ DB_RATES = {
 }
 
 # ==========================================
-# ⚙️ [ส่วนที่ 2] ระบบหลังบ้าน (DB & Logic)
+# ⚙️ [ส่วนที่ 2] ระบบหลังบ้าน (DB & Login)
 # ==========================================
-st.set_page_config(page_title="KK-Team Pro V16", layout="wide")
+st.set_page_config(page_title="KK-Team Pro V17", layout="wide")
 DB_FILE = "kkteam_pro_v15.db"
 
 def get_conn(): return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -77,15 +77,38 @@ def save_data(code, price, cat, sub):
         conn.execute("INSERT INTO products VALUES (?,?,?,?) ON CONFLICT(code) DO UPDATE SET price=excluded.price, category=excluded.category, sub_category=excluded.sub_category", 
                     (code.strip().upper(), price, cat, sub))
 
-# ==========================================
-# 🛒 [ส่วนที่ 3] ส่วนแสดงผล (UI)
-# ==========================================
-st.title("🛡️ KK-Team Smart PRO V16")
+# เช็คสถานะการ Login
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
 
-# ปุ่ม Refresh: ล้าง session ตะกร้าเพื่อเริ่มใหม่
-if st.button("🔄 เริ่มรายการใหม่ (Refresh)"):
-    st.session_state.cart = []
-    st.rerun()
+# ==========================================
+# 🔐 [หน้า Login]
+# ==========================================
+if not st.session_state.authenticated:
+    st.markdown("### 🛡️ KK-Team Smart PRO Login")
+    pwd = st.text_input("กรุณาใส่รหัสผ่านเพื่อเข้าใช้งาน:", type="password")
+    if st.button("เข้าสู่ระบบ"):
+        if pwd == "KK-Team":
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("รหัสผ่านไม่ถูกต้อง!")
+    st.stop() # หยุดการทำงานถ้ารหัสไม่ถูก
+
+# ==========================================
+# 🛒 [ส่วนที่ 3] หน้าหลักแอป (เมื่อ Login ผ่านแล้ว)
+# ==========================================
+st.title("🛡️ KK-Team Smart PRO V17")
+
+col_top1, col_top2 = st.columns([1, 6])
+with col_top1:
+    if st.button("🔄 เริ่มใหม่"):
+        st.session_state.cart = []
+        st.rerun()
+with col_top2:
+    if st.button("🚪 ออกจากระบบ"):
+        st.session_state.authenticated = False
+        st.rerun()
 
 cust_group = st.radio("เลือกกลุ่มลูกค้า:", ["Dealer / Installer", "IT Shop (+5%)"], horizontal=True)
 
@@ -99,7 +122,7 @@ with st.container(border=True):
         d_price, d_cat, d_sub = 0.0, "1. LAN (UTP)", "Cable"
         if not res.empty:
             d_price, d_cat, d_sub = float(res.iloc[0]['price']), res.iloc[0]['category'], res.iloc[0]['sub_category']
-            st.success(f"📌 พบข้อมูลเดิม: {d_cat} | {d_sub}")
+            st.success(f"📌 ข้อมูลเดิม: {d_cat} | {d_sub}")
 
         f_code = st.text_input("✨ ยืนยันรหัสสินค้า", value=selected_code).strip().upper()
         f_cat = st.selectbox("หมวดหมู่หลัก", list(DB_RATES.keys()), index=list(DB_RATES.keys()).index(d_cat) if d_cat in DB_RATES else 0)
@@ -116,22 +139,18 @@ with st.container(border=True):
 if st.button("🚀 คำนวณและบันทึกข้อมูล", use_container_width=True):
     if f_code:
         save_data(f_code, f_price, f_cat, f_sub)
-        
         cat_info = DB_RATES[f_cat][f_sub]
         
-        # เลือกเรทตาม Price Split
         if f_sub == "Acc" and "Price_Split" in cat_info:
             split = cat_info["Price_Split"]
             rate_info = cat_info["Under"] if f_price < split else cat_info["Over"]
         else:
             rate_info = cat_info
 
-        # หา Step ตาม Qty และคำนวณ "ช่วงเรท"
         idx = 0
         for i, v in enumerate(rate_info["C"]):
             if qty >= v: idx = i
         
-        # คำนวณคำอธิบายช่วงเรท
         low_val = rate_info["C"][idx]
         unit = cat_info["UT"]
         if idx + 1 < len(rate_info["C"]):
@@ -140,11 +159,9 @@ if st.button("🚀 คำนวณและบันทึกข้อมูล"
         else:
             range_desc = f"เรท {low_val} {unit} ขึ้นไป"
 
-        # ดึงส่วนลด
         base_rate = rate_info["R"][idx]
         final_rate_str = base_rate + ("+5" if "IT Shop" in cust_group else "")
         
-        # คำนวณราคา Net
         net_p = f_price
         calc_steps = f"{f_price:,.2f}"
         discount_list = [x for x in final_rate_str.split("+") if x.strip()]
@@ -154,13 +171,13 @@ if st.button("🚀 คำนวณและบันทึกข้อมูล"
             net_p *= (1 - d_val/100)
             
         res_line = f"{f_code} = {net_p:,.2f}.-/{unit} ({range_desc}) *ราคาตั้ง {f_price:,.2f}*"
-        res_note = f"💡 ส่วนลดที่ใช้: {final_rate_str}% | วิธีคิด: {calc_steps}"
+        res_note = f"💡 ส่วนลด: {final_rate_str}% | วิธีคิด: {calc_steps}"
         
         if 'cart' not in st.session_state: st.session_state.cart = []
         st.session_state.cart.append({"main": res_line, "note": res_note})
         st.rerun()
 
-# สรุปตะกร้าสินค้า
+# สรุปรายการ
 if 'cart' in st.session_state and st.session_state.cart:
     st.divider()
     summary_text = []
@@ -170,10 +187,13 @@ if 'cart' in st.session_state and st.session_state.cart:
         summary_text.append(item['main'])
     
     st.text_area("📋 คัดลอกลง LINE:", value="\n".join(summary_text), height=150)
-    if st.button("🗑️ ล้างรายการคำนวณ"):
+    if st.button("🗑️ ล้างรายการ"):
         st.session_state.cart = []
         st.rerun()
 
+st.divider()
+st.subheader("📊 ประวัติสินค้าที่เคยบันทึก")
+st.dataframe(pd.read_sql("SELECT * FROM products ORDER BY code DESC", get_conn()), use_container_width=True, hide_index=True)
 # 📊 แสดงฐานข้อมูล
 st.divider()
 st.subheader("📊 ประวัติสินค้าที่เคยบันทึก")
