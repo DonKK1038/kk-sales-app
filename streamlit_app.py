@@ -1,158 +1,180 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
-import os
 
-# --- 1. ตั้งค่าหน้าจอ ---
-st.set_page_config(page_title="KK-Team Smart System V5", layout="wide")
+# =========================
+# 🔧 CONFIG
+# =========================
+st.set_page_config(page_title="KK-Team Smart System PRO", layout="wide")
 
-# --- 2. ระบบจัดการ Database (Version 5: Force Reset & Update) ---
-DB_FILE = "interlink_master_v5.csv"
+DB_FILE = "kkteam.db"
 
-def load_data():
-    cols = ["code", "price", "category", "sub_category"]
-    if os.path.exists(DB_FILE):
-        try:
-            df = pd.read_csv(DB_FILE)
-            # ตรวจสอบโครงสร้าง ถ้าไม่ตรง (Error แบบในรูป) ให้สร้างใหม่ทันที
-            if not all(c in df.columns for c in cols):
-                return pd.DataFrame(columns=cols)
-            df['code'] = df['code'].astype(str).str.strip().upper()
-            return df.drop_duplicates(subset=['code'], keep='last')
-        except:
-            return pd.DataFrame(columns=cols)
-    return pd.DataFrame(columns=cols)
+# =========================
+# 🧠 DATABASE
+# =========================
+def get_conn():
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
 
-def force_save(code, price, cat, sub_cat):
-    df = load_data()
-    code = str(code).strip().upper()
-    if not code: return
-    # ลบข้อมูลเก่าเพื่ออัปเดตใหม่ (Overwrite)
-    df = df[df['code'] != code]
-    new_entry = pd.DataFrame([{
-        "code": code, 
-        "price": float(price), 
-        "category": cat, 
-        "sub_category": sub_cat
-    }])
-    df = pd.concat([df, new_entry], ignore_index=True)
-    # บังคับเขียนลงไฟล์ทันที
-    df.to_csv(DB_FILE, index=False)
+def init_db():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        code TEXT PRIMARY KEY,
+        price REAL,
+        category TEXT,
+        sub_category TEXT
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# =========================
+# 🔍 DB FUNCTIONS
+# =========================
+def get_product(code):
+    conn = get_conn()
+    df = pd.read_sql("SELECT * FROM products WHERE code=?", conn, params=(code,))
+    conn.close()
     return df
 
-# --- 3. ระบบ Login ---
-if 'auth' not in st.session_state: st.session_state.auth = False
+def search_code(keyword):
+    conn = get_conn()
+    df = pd.read_sql(
+        "SELECT code FROM products WHERE code LIKE ? LIMIT 10",
+        conn,
+        params=(f"{keyword}%",)
+    )
+    conn.close()
+    return df['code'].tolist()
+
+def save_product(code, price, cat, sub):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+    INSERT INTO products (code, price, category, sub_category)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(code) DO UPDATE SET
+        price=excluded.price,
+        category=excluded.category,
+        sub_category=excluded.sub_category
+    """, (code, price, cat, sub))
+    conn.commit()
+    conn.close()
+
+def load_all():
+    conn = get_conn()
+    df = pd.read_sql("SELECT * FROM products ORDER BY code DESC", conn)
+    conn.close()
+    return df
+
+# =========================
+# 🔐 LOGIN
+# =========================
+if 'auth' not in st.session_state:
+    st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.title("🔐 KK-Team Internal System")
-    pw = st.text_input("กรุณาใส่รหัสผ่านเพื่อเข้าใช้งาน", type="password")
-    if st.button("เข้าสู่ระบบ"):
+    st.title("🔐 KK-Team System PRO")
+    pw = st.text_input("Password", type="password")
+
+    if st.button("Login"):
         if pw == "KK-Team":
             st.session_state.auth = True
             st.rerun()
         else:
-            st.error("❌ รหัสไม่ถูกต้อง")
+            st.error("Wrong Password")
+
     st.stop()
 
-# --- 4. ข้อมูลเรทส่วนลดมาตรฐาน ---
+# =========================
+# 📊 RATE TABLE
+# =========================
 DB_RATES = {
-    "1. LAN (UTP)": {"C": [1,3,5,10,20,30,50,100], "UT": "กล่อง", "R": ["10+10","10+10+2","10+10+3","10+10+5","10+10+5+2","10+10+5+3","10+10+5+5","10+10+5+5+5"]},
-    "2. FIBER OPTIC": {"C": [1,500,1000,3000,5000,8000,10000,20000,30000], "UT": "เมตร", "R": ["10","10+5","10+10","10+10+3","10+10+5","10+10+5+3","10+10+5+5","10+10+5+5+3","10+10+5+5+5"]},
-    "3. FTTx / FTTR": {"C": [1,3,5,10,20,30,50,100], "UT": "ม้วน", "R": ["10+10","10+10+2","10+10+3","10+10+5","10+10+5+2","10+10+5+3","10+10+5+5","10+10+5+5+5"]},
-    "4. COAXIAL (RG)": {"C": [1,500,1000,3000,5000,8000,10000,20000,30000], "UT": "เมตร", "R": ["20","20+5","20+10","20+10+3","20+10+5","20+10+5+3","20+10+5+5","20+10+5+5+3","20+10+5+5+5"]},
-    "5. SECURITY & CONTROL": {"C": [1,100,200,500,1000,2000], "UT": "เมตร", "R": ["10+10","10+10+5","10+10+10","10+10+10+5","10+10+10+10","10+10+10+10+5"]},
-    "6. SOLAR": {"C": [1,500,1000,3000,5000,10000,20000,30000,50000], "UT": "เมตร", "R": ["10","10+5","10+10","10+10+3","10+10+5","10+10+5+3","10+10+5+5","10+10+5+5+3","10+10+5+5+5"]},
-    "7. TELEPHONE": {"C": [1,100,200,300,500,1000], "UT": "เมตร", "R": ["15","15+5","15+10","15+10+5","15+10+10","15+10+10+5"]},
-    "8. NETWORKING": {"C": [1,2,5,10,20], "UT": "เครื่อง", "R": ["10","10+2","10+3","10+5","10+5+2"]},
-    "9/10/11. RACK": {"C": [1,2,3,4,5,10,20], "UT": "ตู้", "R": ["20","20+2","20+3","20+4","20+5","20+5+5","20+5+5+3"]},
-    "COMMSCOPE": {"C": [1,5,10,20,50], "UT": "หน่วย", "R": ["10","10+2","10+3","10+5","10+5+5"]}
+    "LAN": {"C":[1,3,5,10], "UT":"กล่อง", "R":["10","10+5","10+10","10+10+5"]},
+    "FIBER": {"C":[1,1000,5000], "UT":"เมตร", "R":["10","10+5","10+10"]},
+    "SOLAR": {"C":[1,1000,5000], "UT":"เมตร", "R":["10","10+5","10+10"]}
 }
 
-# --- 5. การทำงานหน้าหลัก ---
-if 'cart' not in st.session_state: st.session_state.cart = []
+# =========================
+# 🛒 UI
+# =========================
+st.title("🛒 KK-Team Smart Calculator PRO")
 
-tab1, tab2 = st.tabs(["🛒 คำนวณราคา & บันทึก", "📊 ตารางฐานข้อมูล"])
+col1, col2 = st.columns(2)
 
-with tab1:
-    st.header("โปรแกรมคำนวณราคา Interlink")
-    cust_group = st.radio("เลือกกลุ่มลูกค้า:", ["Dealer / Installer", "IT Shop (+5%)"], horizontal=True)
-    
-    master_df = load_data()
-    
-    with st.container(border=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            # ช่องเดียวจบ: พิมพ์รหัสที่นี่
-            input_code = st.text_input("🔍 รหัสสินค้า (พิมพ์รหัสเดิมเพื่อดึงข้อมูล หรือพิมพ์ใหม่เพื่อเพิ่ม)").strip().upper()
-            
-            # Auto-fill จากฐานข้อมูล
-            match = master_df[master_df['code'] == input_code]
-            s_price, s_cat, s_sub = 0.0, list(DB_RATES.keys())[0], "สินค้า (Cable)"
-            
-            if not match.empty:
-                s_price = float(match.iloc[0]['price'])
-                s_cat = match.iloc[0]['category']
-                s_sub = match.iloc[0]['sub_category']
-                st.success(f"📌 พบข้อมูลในระบบ: {s_cat} | ราคาตั้งล่าสุด {s_price:,.2f}")
+with col1:
+    keyword = st.text_input("🔍 พิมพ์รหัสสินค้า")
 
-            f_cat = st.selectbox("หมวดหมู่สินค้า", list(DB_RATES.keys()), index=list(DB_RATES.keys()).index(s_cat))
-            f_sub = st.radio("ประเภท", ["สินค้า (Cable)", "อุปกรณ์ (Conn/Acc)"], index=0 if s_sub == "สินค้า (Cable)" else 1, horizontal=True)
-            
-        with col2:
-            f_price = st.number_input("ราคาตั้ง (List Price)", value=s_price, format="%.2f", step=0.01)
-            qty = st.number_input("จำนวนที่สั่งซื้อ", min_value=1, value=1)
-            
-        if st.button("🚀 คำนวณและอัปเดตฐานข้อมูล", use_container_width=True):
-            if not input_code:
-                st.warning("⚠️ กรุณาใส่รหัสสินค้าก่อนคำนวณ")
-            else:
-                # 1. บันทึกเข้า DB แบบ Force Write
-                force_save(input_code, f_price, f_cat, f_sub)
-                
-                # 2. คำนวณราคาละเอียด
-                data = DB_RATES[f_cat]
-                idx = 0
-                for i, v in enumerate(data["C"]):
-                    if qty >= v: idx = i
-                
-                base_rate = data["R"][idx]
-                if (f_cat == "1. LAN (UTP)" and f_sub == "อุปกรณ์ (Conn/Acc)"):
-                    base_rate = base_rate.replace("10", "20")
-                
-                final_rate = base_rate + "+5" if "IT Shop" in cust_group else base_rate
-                
-                # คิดเงินแบบ Step-by-Step
-                current_p = f_price
-                calc_steps = f"{f_price:,.2f}"
-                for d in [float(x) for x in final_rate.split('+')]:
-                    calc_steps += f" - {d}%"
-                    current_p *= (1 - d/100)
-                
-                unit = data["UT"] if f_sub == "สินค้า (Cable)" else "ชิ้น"
-                res_line = f"{input_code}={current_p:,.2f}.-/{unit} (เรทสั่งซื้อ {qty} {unit}) *ราคาตั้ง {f_price:,.2f}*"
-                res_note = f"💡 วิธีคิด: {calc_steps} = {current_p:,.2f}"
-                
-                st.session_state.cart.append({"main": res_line, "note": res_note})
-                st.rerun()
+    suggestions = []
+    if keyword:
+        suggestions = search_code(keyword)
 
-    # แสดงตะกร้าสินค้า
-    if st.session_state.cart:
-        st.divider()
-        copy_text = []
-        for item in st.session_state.cart:
-            st.write(f"**{item['main']}**")
-            st.caption(item['note'])
-            copy_text.append(item['main'])
-        
-        st.text_area("ก๊อปปี้ไปวางใน Line:", value="\n".join(copy_text), height=150)
-        if st.button("🗑️ ล้างรายการ"):
-            st.session_state.cart = []
-            st.rerun()
+    selected_code = st.selectbox(
+        "📌 Auto Suggest",
+        options=[""] + suggestions
+    )
 
-with tab2:
-    st.subheader("📊 ตารางฐานข้อมูลสินค้า (Update Real-time)")
-    # โหลดข้อมูลสดๆ มาโชว์
-    db_display = load_data()
-    st.dataframe(db_display, use_container_width=True, hide_index=True)
-    
-    if st.button("🔄 รีเฟรชข้อมูล"):
-        st.rerun()
+    input_code = selected_code if selected_code else keyword.upper()
+
+    product = get_product(input_code)
+
+    if not product.empty:
+        price = float(product.iloc[0]['price'])
+        cat = product.iloc[0]['category']
+        sub = product.iloc[0]['sub_category']
+        st.success(f"เจอสินค้า: {price}")
+    else:
+        price = 0.0
+        cat = "LAN"
+        sub = "Cable"
+
+    cat = st.selectbox("Category", list(DB_RATES.keys()), index=list(DB_RATES.keys()).index(cat))
+    sub = st.radio("Type", ["Cable", "Accessory"], horizontal=True)
+
+with col2:
+    price = st.number_input("Price", value=price)
+    qty = st.number_input("Qty", value=1)
+
+# =========================
+# 💰 CALCULATE
+# =========================
+if st.button("🚀 Calculate & Save"):
+    if not input_code:
+        st.warning("ใส่รหัสก่อน")
+    else:
+        # SAVE
+        save_product(input_code, price, cat, sub)
+
+        # CALC
+        data = DB_RATES[cat]
+
+        idx = 0
+        for i, v in enumerate(data["C"]):
+            if qty >= v:
+                idx = i
+
+        rate = data["R"][idx]
+
+        final_price = price
+        steps = f"{price}"
+
+        for d in [float(x) for x in rate.split("+")]:
+            steps += f" -{d}%"
+            final_price *= (1 - d/100)
+
+        result = f"{input_code} = {final_price:,.2f}"
+
+        st.success(result)
+        st.caption(f"วิธีคิด: {steps}")
+
+# =========================
+# 📊 TABLE
+# =========================
+st.divider()
+st.subheader("📊 Database")
+
+df = load_all()
+st.dataframe(df, use_container_width=True)
