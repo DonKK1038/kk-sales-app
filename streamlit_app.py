@@ -11,13 +11,15 @@ DB_FILE = "database.csv"
 def load_data():
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
+        # ตรวจสอบและลบช่องว่าง/ทำเป็นตัวพิมพ์ใหญ่
+        df['code'] = df['code'].astype(str).str.strip().upper()
         return df.drop_duplicates(subset=['code'], keep='last')
     return pd.DataFrame(columns=["code", "price"])
 
 def save_data(code, price):
     df = load_data()
     code = str(code).strip().upper()
-    # ลบตัวเก่าออกก่อน (ถ้ามี) แล้วเพิ่มตัวใหม่เข้าไป (Update)
+    if not code: return # ป้องกันค่าว่าง
     df = df[df['code'] != code]
     new_entry = pd.DataFrame([{"code": code, "price": float(price)}])
     df = pd.concat([df, new_entry], ignore_index=True)
@@ -28,7 +30,6 @@ def delete_data(code):
     df = df[df['code'] != code]
     df.to_csv(DB_FILE, index=False)
 
-# โหลดข้อมูลเข้า Session
 if 'master_data' not in st.session_state:
     st.session_state.master_data = load_data()
 
@@ -82,24 +83,30 @@ with tab1:
     with st.container(border=True):
         col1, col2 = st.columns(2)
         with col1:
-            # ดึงรหัสเดิมมาทำ Dropdown
+            # ดึงข้อมูลรหัสสินค้าปัจจุบัน
             st.session_state.master_data = load_data()
-            existing_codes = st.session_state.master_data['code'].tolist()
-            p_code_select = st.selectbox("เลือกจากฐานข้อมูล (พิมพ์เพื่อค้นหา)", ["-- เลือกรายการ --"] + existing_codes)
+            codes_list = st.session_state.master_data['code'].tolist()
             
-            p_code_input = st.text_input("หรือกรอกรหัสใหม่ (เช่น US-9106A)").strip().upper()
-            final_code = p_code_input if p_code_input else (p_code_select if p_code_select != "-- เลือกรายการ --" else "")
+            # --- ยุบรวมช่องค้นหาและกรอกใหม่ ---
+            # ใช้ st.selectbox ร่วมกับฟีเจอร์การค้นหา แต่เพิ่ม placeholder เพื่อให้พิมพ์ค่าใหม่ได้
+            selected_code = st.selectbox(
+                "ค้นหารหัสสินค้า (พิมพ์รหัสใหม่ลงไปได้ทันที)",
+                options=codes_list,
+                index=None,
+                placeholder="พิมพ์รหัสสินค้าที่นี่...",
+            )
+            
+            final_code = str(selected_code).strip().upper() if selected_code else ""
             
             cat = st.selectbox("หมวดหมู่สินค้า", list(DB_RATES.keys()))
             mode = st.radio("ประเภท", ["สินค้า (Cable)", "อุปกรณ์ (Conn/Acc)"], horizontal=True)
 
         with col2:
-            # ดึงราคาตั้งจาก DB อัตโนมัติ
+            # ดึงราคาตั้งจาก DB อัตโนมัติถ้ามีรหัสนี้อยู่แล้ว
             auto_price = 0.0
-            if final_code:
+            if final_code in codes_list:
                 match = st.session_state.master_data[st.session_state.master_data['code'] == final_code]
-                if not match.empty:
-                    auto_price = float(match.iloc[0]['price'])
+                auto_price = float(match.iloc[0]['price'])
             
             list_p = st.number_input("ราคาตั้ง (List Price)", min_value=0.0, value=auto_price, step=10.0)
             qty = st.number_input("จำนวนที่สั่งซื้อ", min_value=1, step=1)
@@ -107,11 +114,11 @@ with tab1:
         is_face = (cat == "1. LAN (UTP)" and mode == "อุปกรณ์ (Conn/Acc)")
         if is_face: is_face_check = st.checkbox("เป็นรายการ Face Plate / Cable Mgmt (ฐาน 20%)")
 
-        if st.button("🔍 ตรวจสอบราคา", use_container_width=True):
+        if st.button("🔍 ตรวจสอบและบันทึกราคา", use_container_width=True):
             if not final_code:
-                st.warning("⚠️ กรุณาระบุรหัสสินค้าก่อนคำนวณ")
+                st.warning("⚠️ กรุณากรอกรหัสสินค้าก่อนคำนวณ")
             else:
-                # บันทึกข้อมูลเข้า DB ทันที
+                # บันทึก/อัปเดตราคาล่าสุดลงฐานข้อมูล
                 save_data(final_code, list_p)
                 
                 data = DB_RATES[cat]
@@ -150,7 +157,6 @@ with tab1:
 
 with tab2:
     st.header("⚙️ ระบบจัดการข้อมูลหลังบ้าน")
-    
     current_db = load_data()
     
     col_a, col_b = st.columns([2, 1])
@@ -163,6 +169,7 @@ with tab2:
             
     with col_b:
         st.subheader("เครื่องมือจัดการ")
+        existing_codes = current_db['code'].tolist()
         del_code = st.selectbox("เลือกรหัสที่ต้องการลบ", ["-- เลือก --"] + existing_codes)
         if st.button("❌ ยืนยันการลบ", type="primary"):
             if del_code != "-- เลือก --":
@@ -171,7 +178,6 @@ with tab2:
                 st.rerun()
         
         st.divider()
-        # ปุ่มสำรองข้อมูล
         csv_data = current_db.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 ดาวน์โหลดไฟล์ Database (CSV)",
