@@ -3,9 +3,8 @@ import sqlite3
 import pandas as pd
 
 # ==========================================
-# 📊 [ส่วนที่ 1] ศูนย์รวมเรทราคา (แก้ไขที่นี่ได้เลย)
+# 📊 [ส่วนที่ 1] ศูนย์รวมเรทราคา (ข้อมูลตามที่คุณแก้ไข)
 # ==========================================
-# C = จำนวนขั้นบันได, R = ส่วนลด (%), UT = หน่วยนับ
 DB_RATES = {
     "1. LAN (UTP)": {
         "Cable": {"C": [1,3,5,10,20,30,50,100], "R": ["10+10","10+10+2","10+10+3","10+10+5","10+10+5+2","10+10+5+3","10+10+5+5","10+10+5+5+5"], "UT": "กล่อง"},
@@ -39,19 +38,19 @@ DB_RATES = {
     },
     "6. SOLAR": {
         "Cable": {"C": [1,500,1000,3000,5000,10000,20000,30000,50000], "R": ["10","10+5","10+10","10+10+3","10+10+5","10+10+5+3","10+10+5+5","10+10+5+5+3","10+10+5+5+5"], "UT": "เมตร"},
-         "Acc": {"Price_Split": 300, 
+        "Acc": {"Price_Split": 300, 
                 "Under": {"C": [1,10,30,50,100,200,300,500,1000], "R": ["20","20+2","20+3","+20+5","20+10","20+10+5","20+10+5+3","20+10+5+5","20+10+5+5+5"]},
                 "Over":  {"C": [1,2,3,5,10,20,30,50,100], "R": ["20","20+2","20+3","+20+5","20+10","20+10+5","20+10+5+3","20+10+5+5","20+10+5+5+5"]}, "UT": "ชิ้น"}
     },
     "7. TELEPHONE": {
         "Cable": {"C": [1,500,1000,3000,5000,10000,20000,30000,50000], "R": ["10","10+5","10+10","10+10+3","10+10+5","10+10+5+3","10+10+5+5","10+10+5+5+3","10+10+5+5+5"], "UT": "เมตร"},
-         "Acc": {"Price_Split": 300, 
+        "Acc": {"Price_Split": 300, 
                 "Under": {"C": [1,10,30,50,100,200,300,500,1000], "R": ["20","20+2","20+3","+20+5","20+10","20+10+5","20+10+5+3","20+10+5+5","20+10+5+5+5"]},
                 "Over":  {"C": [1,2,3,5,10,20,30,50,100], "R": ["20","20+2","20+3","+20+5","20+10","20+10+5","20+10+5+3","20+10+5+5","20+10+5+5+5"]}, "UT": "ชิ้น"}
     },
     "8. NETWORKING": {
         "Cable": {"C": [1,3,5,10,15,20,50], "R": ["20","20+3","20+5","20+5+3","20+5+5","20+5+5+3","20+5+5+5"], "UT": "เครื่อง"},
-        "Acc": {"C": [1,3,5,10,30,50], "R": ["20","20+5","20+5+5","20+5+5+5","20+5+5+5+5], "UT": "ชิ้น"}
+        "Acc": {"C": [1,3,5,10,30,50], "R": ["20","20+5","20+5+5","20+5+5+5","20+5+5+5+5"], "UT": "ชิ้น"}
     },
     "9/10/11. RACK": {
         "Cable": {"C": [1,2,3,4,5,10,20], "R": ["20","20+2","20+3","20+4","20+5","20+5+5","20+5+5+3"], "UT": "ตู้"},
@@ -92,7 +91,6 @@ with st.container(border=True):
         known_codes = pd.read_sql("SELECT code FROM products", get_conn())['code'].tolist()
         selected_code = st.selectbox("🔍 ค้นหาหรือพิมพ์รหัสสินค้า", options=[""] + known_codes)
         
-        # ดึงข้อมูล 4 มิติกลับมา
         res = pd.read_sql("SELECT * FROM products WHERE code=?", get_conn(), params=(selected_code,))
         d_price, d_cat, d_sub = 0.0, "1. LAN (UTP)", "Cable"
         if not res.empty:
@@ -115,11 +113,9 @@ if st.button("🚀 คำนวณและบันทึกข้อมูล"
     if f_code:
         save_data(f_code, f_price, f_cat, f_sub)
         
-        # ค้นหาข้อมูลเรทตามหมวด
         cat_info = DB_RATES[f_cat][f_sub]
         p_label = "เรทปกติ"
         
-        # วิเคราะห์ราคาตั้ง (Price Threshold)
         if f_sub == "Acc" and "Price_Split" in cat_info:
             split = cat_info["Price_Split"]
             if f_price < split:
@@ -131,18 +127,22 @@ if st.button("🚀 คำนวณและบันทึกข้อมูล"
         else:
             rate_info = cat_info
 
-        # หา Step ตาม Qty
         idx = 0
         for i, v in enumerate(rate_info["C"]):
             if qty >= v: idx = i
         
-        base_rate = rate_info["R"][idx]
+        # ป้องกันกรณีจำนวนเรทกับจำนวนขั้นบันไดไม่เท่ากัน
+        try:
+            base_rate = rate_info["R"][idx]
+        except IndexError:
+            base_rate = rate_info["R"][-1]
+
         final_rate_str = base_rate + ("+5" if "IT Shop" in cust_group else "")
         
-        # คำนวณราคา Net
         net_p = f_price
         calc_steps = f"{f_price:,.2f}"
-        for d in [float(x) for x in final_rate_str.split("+")]:
+        # เพิ่มตัวกรอง if x.strip() เพื่อรองรับเครื่องหมาย + ที่อาจอยู่หน้าตัวเลข
+        for d in [float(x) for x in final_rate_str.split("+") if x.strip()]:
             calc_steps += f" - {d}%"
             net_p *= (1 - d/100)
             
@@ -154,7 +154,6 @@ if st.button("🚀 คำนวณและบันทึกข้อมูล"
         st.session_state.cart.append({"main": res_line, "note": res_note})
         st.rerun()
 
-# สรุปตะกร้าสินค้า
 if 'cart' in st.session_state and st.session_state.cart:
     st.divider()
     summary = []
@@ -165,7 +164,6 @@ if 'cart' in st.session_state and st.session_state.cart:
     st.text_area("คัดลอกลง LINE:", value="\n".join(summary), height=150)
     if st.button("🗑️ ล้างรายการคำนวณ"): st.session_state.cart = []; st.rerun()
 
-# 📊 แสดงฐานข้อมูล 4 มิติ
 st.divider()
 st.subheader("📊 ประวัติสินค้าที่เคยบันทึก (4 มิติ)")
 st.dataframe(pd.read_sql("SELECT * FROM products ORDER BY code DESC", get_conn()), use_container_width=True, hide_index=True)
