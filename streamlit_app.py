@@ -11,7 +11,6 @@ DB_FILE = "database.csv"
 def load_data():
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
-        # ตรวจสอบและลบช่องว่าง/ทำเป็นตัวพิมพ์ใหญ่
         df['code'] = df['code'].astype(str).str.strip().upper()
         return df.drop_duplicates(subset=['code'], keep='last')
     return pd.DataFrame(columns=["code", "price"])
@@ -19,7 +18,9 @@ def load_data():
 def save_data(code, price):
     df = load_data()
     code = str(code).strip().upper()
-    if not code: return # ป้องกันค่าว่าง
+    if not code: return 
+    
+    # ลบข้อมูลรหัสเดิมออก (ถ้ามี) แล้วเพิ่มตัวใหม่ที่มีราคาล่าสุดเข้าไปแทนที่
     df = df[df['code'] != code]
     new_entry = pd.DataFrame([{"code": code, "price": float(price)}])
     df = pd.concat([df, new_entry], ignore_index=True)
@@ -83,32 +84,31 @@ with tab1:
     with st.container(border=True):
         col1, col2 = st.columns(2)
         with col1:
-            # ดึงข้อมูลรหัสสินค้าปัจจุบัน
             st.session_state.master_data = load_data()
             codes_list = st.session_state.master_data['code'].tolist()
             
-            # --- ยุบรวมช่องค้นหาและกรอกใหม่ ---
-            # ใช้ st.selectbox ร่วมกับฟีเจอร์การค้นหา แต่เพิ่ม placeholder เพื่อให้พิมพ์ค่าใหม่ได้
-            selected_code = st.selectbox(
-                "ค้นหารหัสสินค้า (พิมพ์รหัสใหม่ลงไปได้ทันที)",
-                options=codes_list,
-                index=None,
-                placeholder="พิมพ์รหัสสินค้าที่นี่...",
-            )
+            # --- แก้ไขให้เป็น 2 ชั้นเพื่อให้รองรับการพิมพ์รหัสใหม่ 100% ---
+            selected_history = st.selectbox("🔍 เลือกจากประวัติการค้นหา (ถ้ามี)", ["-- พิมพ์รหัสใหม่ด้านล่าง --"] + codes_list)
             
-            final_code = str(selected_code).strip().upper() if selected_code else ""
+            default_code = ""
+            if selected_history != "-- พิมพ์รหัสใหม่ด้านล่าง --":
+                default_code = selected_history
+                
+            final_code = st.text_input("📝 รหัสสินค้า (กรอกใหม่ หรือ แก้ไขได้ที่นี่)", value=default_code).strip().upper()
             
             cat = st.selectbox("หมวดหมู่สินค้า", list(DB_RATES.keys()))
             mode = st.radio("ประเภท", ["สินค้า (Cable)", "อุปกรณ์ (Conn/Acc)"], horizontal=True)
 
         with col2:
-            # ดึงราคาตั้งจาก DB อัตโนมัติถ้ามีรหัสนี้อยู่แล้ว
+            # ดึงราคาตั้งมาโชว์อัตโนมัติ ถ้ามีรหัสนี้ในฐานข้อมูล
             auto_price = 0.0
-            if final_code in codes_list:
+            if final_code and (final_code in codes_list):
                 match = st.session_state.master_data[st.session_state.master_data['code'] == final_code]
-                auto_price = float(match.iloc[0]['price'])
+                if not match.empty:
+                    auto_price = float(match.iloc[0]['price'])
             
-            list_p = st.number_input("ราคาตั้ง (List Price)", min_value=0.0, value=auto_price, step=10.0)
+            # เมื่อดึงมาแล้ว คุณดนย์สามารถลบแก้ตรงนี้ได้เลย พอแก้ปุ๊บกดบันทึก มันจะทับของเก่าทันที
+            list_p = st.number_input("ราคาตั้ง (List Price)", min_value=0.0, value=auto_price, step=10.0, format="%.2f")
             qty = st.number_input("จำนวนที่สั่งซื้อ", min_value=1, step=1)
 
         is_face = (cat == "1. LAN (UTP)" and mode == "อุปกรณ์ (Conn/Acc)")
@@ -118,8 +118,9 @@ with tab1:
             if not final_code:
                 st.warning("⚠️ กรุณากรอกรหัสสินค้าก่อนคำนวณ")
             else:
-                # บันทึก/อัปเดตราคาล่าสุดลงฐานข้อมูล
+                # 💥 หัวใจสำคัญ: บันทึกข้อมูลหรือเขียนทับราคาใหม่ลง Database ทันที
                 save_data(final_code, list_p)
+                st.session_state.master_data = load_data() # โหลดข้อมูลใหม่ให้ระบบจำทันที
                 
                 data = DB_RATES[cat]
                 idx = 0
