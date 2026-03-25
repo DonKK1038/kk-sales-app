@@ -3,10 +3,10 @@ import pandas as pd
 import os
 
 # --- 1. ตั้งค่าหน้าจอ ---
-st.set_page_config(page_title="Interlink Smart Pro", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Interlink Smart Pro (KK-Team)", page_icon="🛡️", layout="wide")
 
 # --- 2. ระบบจัดการ Database ---
-DB_FILE = "database_final.csv"
+DB_FILE = "database_v4_final.csv"
 
 def load_data():
     cols = ["code", "price", "category", "sub_category"]
@@ -24,14 +24,28 @@ def save_to_db(code, price, cat, sub_cat):
     df = load_data()
     code = str(code).strip().upper()
     if not code: return 
-    # ลบข้อมูลเก่าถ้ามีรหัสซ้ำ เพื่ออัปเดตราคา/หมวดหมู่ล่าสุด
+    # ลบข้อมูลเก่าที่มีรหัสเดียวกันออกก่อน เพื่อเตรียมเขียนใหม่ (Overwrite)
     df = df[df['code'] != code]
     new_data = pd.DataFrame([{"code": code, "price": float(price), "category": cat, "sub_category": sub_cat}])
     df = pd.concat([df, new_data], ignore_index=True)
     df.to_csv(DB_FILE, index=False)
     return df
 
-# --- 3. ฟังก์ชันคำนวณแบบละเอียด ---
+# --- 3. ระบบ Login ---
+if 'auth' not in st.session_state: st.session_state.auth = False
+
+if not st.session_state.auth:
+    st.title("🔐 KK-Team Internal System")
+    pw = st.text_input("กรุณาใส่รหัสผ่าน", type="password")
+    if st.button("เข้าสู่ระบบ"):
+        if pw == "KK-Team":
+            st.session_state.auth = True
+            st.rerun()
+        else:
+            st.error("❌ รหัสไม่ถูกต้อง กรุณาลองใหม่")
+    st.stop()
+
+# --- 4. ฟังก์ชันคำนวณราคา ---
 def get_calculation_detail(price, discount_str):
     current_price = price
     discounts = [d.strip() for d in discount_str.split('+') if d.strip()]
@@ -54,10 +68,10 @@ DB_RATES = {
     "COMMSCOPE": {"C": [1,5,10,20,50], "UT": "หน่วย", "R": ["10","10+2","10+3","10+5","10+5+5"]}
 }
 
-# --- 4. หน้าจอหลัก ---
+# --- 5. หน้าจอหลัก (Tabs) ---
 if 'cart' not in st.session_state: st.session_state.cart = []
 
-tab1, tab2 = st.tabs(["🛒 เช็คราคา & คำนวณ", "⚙️ จัดการฐานข้อมูล"])
+tab1, tab2 = st.tabs(["🛒 เช็คราคา & คำนวณ", "⚙️ ฐานข้อมูลสินค้า"])
 
 with tab1:
     st.header("ตรวจสอบราคา Interlink (2026)")
@@ -69,9 +83,9 @@ with tab1:
         col1, col2 = st.columns(2)
         with col1:
             # --- ช่องเดียวจบ ---
-            input_code = st.text_input("🔍 รหัสสินค้า (พิมพ์เพื่อหาหรือเพิ่มใหม่)", key="input_code_box").strip().upper()
+            input_code = st.text_input("🔍 รหัสสินค้า (พิมพ์เพื่อหา หรือ เพิ่มใหม่)", key="main_input").strip().upper()
             
-            # ดึงข้อมูล Auto-fill
+            # ดึงข้อมูลจากฐานข้อมูลมาโชว์ทันทีที่พิมพ์รหัสเจอ
             match = master_df[master_df['code'] == input_code]
             s_price, s_cat, s_sub = 0.0, list(DB_RATES.keys())[0], "สินค้า (Cable)"
             
@@ -79,7 +93,7 @@ with tab1:
                 s_price = float(match.iloc[0]['price'])
                 s_cat = match.iloc[0]['category']
                 s_sub = match.iloc[0]['sub_category']
-                st.success(f"📌 ข้อมูลเดิม: {s_cat} | ราคาล่าสุด {s_price:,.2f}")
+                st.success(f"📌 พบข้อมูลเดิม: {s_cat} | ราคาล่าสุด {s_price:,.2f}")
 
             f_cat = st.selectbox("หมวดหมู่สินค้า", list(DB_RATES.keys()), index=list(DB_RATES.keys()).index(s_cat))
             f_sub = st.radio("ประเภท", ["สินค้า (Cable)", "อุปกรณ์ (Conn/Acc)"], index=0 if s_sub == "สินค้า (Cable)" else 1, horizontal=True)
@@ -92,17 +106,17 @@ with tab1:
             if not input_code:
                 st.warning("⚠️ กรุณากรอกรหัสสินค้า")
             else:
-                # 1. บันทึกเข้าฐานข้อมูล (Real-time)
+                # 1. บันทึกข้อมูลเข้า CSV ทันที
                 save_to_db(input_code, f_price, f_cat, f_sub)
                 
-                # 2. คำนวณราคาแบบละเอียด
+                # 2. คำนวณราคาละเอียด
                 data = DB_RATES[f_cat]
                 idx = 0
                 for i, v in enumerate(data["C"]):
                     if qty >= v: idx = i
                 
                 base_rate = data["R"][idx]
-                # กรณี Faceplate LAN
+                # เงื่อนไขพิเศษ Faceplate
                 if (f_cat == "1. LAN (UTP)" and f_sub == "อุปกรณ์ (Conn/Acc)"):
                     base_rate = base_rate.replace("10", "20")
                 
@@ -112,7 +126,7 @@ with tab1:
                 unit_th = data["UT"] if f_sub == "สินค้า (Cable)" else "ชิ้น"
                 range_text = f"{data['C'][idx]}-{data['C'][idx+1]-1}" if idx < len(data["C"])-1 else f"{data['C'][idx]} ขึ้นไป"
 
-                # 3. สร้างข้อความคำตอบแบบยาว (เหมือนเวอร์ชันเดิมที่คุณชอบ)
+                # 3. เตรียมคำตอบ
                 result_line = f"{input_code}={net_unit:,.2f}.-/{unit_th} ก่อนแวท (เรท {range_text}{unit_th}) *หมายเหตุ ราคาตั้ง {f_price:,.2f}*"
                 calc_note = f"💡 วิธีคิด: {calc_steps} = {net_unit:,.2f}"
                 
@@ -122,19 +136,27 @@ with tab1:
     # แสดงตะกร้าสินค้า
     if st.session_state.cart:
         st.divider()
-        all_text = []
+        summary_text = []
         for item in st.session_state.cart:
             st.write(f"**{item['text']}**")
             st.caption(item["note"])
-            all_text.append(item['text'])
+            summary_text.append(item['text'])
         
-        st.text_area("คัดลอกข้อความ:", value="\n".join(all_text), height=150)
+        st.text_area("ก๊อปปี้ไปวางใน Line:", value="\n".join(summary_text), height=150)
         if st.button("🗑️ ล้างรายการ"):
             st.session_state.cart = []; st.rerun()
 
 with tab2:
-    st.subheader("ฐานข้อมูลสินค้า (ตรวจสอบการบันทึก)")
-    db_display = load_data()
-    st.dataframe(db_display, use_container_width=True, hide_index=True)
+    st.subheader("ฐานข้อมูลสินค้าทั้งหมด")
+    # โหลดใหม่ทุกครั้งที่กดดู Tab นี้
+    current_db = load_data()
+    st.dataframe(current_db, use_container_width=True, hide_index=True)
     
-    if st.button("📥 อัปเดตตาราง"): st.rerun()
+    col_a, col_b = st.columns([3, 1])
+    code_to_del = col_a.text_input("พิมพ์รหัสสินค้าที่ต้องการลบ")
+    if col_b.button("❌ ลบรายการ", use_container_width=True):
+        if code_to_del:
+            new_df = current_db[current_db['code'] != code_to_del.upper()]
+            new_df.to_csv(DB_FILE, index=False)
+            st.success(f"ลบ {code_to_del} แล้ว!")
+            st.rerun()
