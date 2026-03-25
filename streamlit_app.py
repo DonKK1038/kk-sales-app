@@ -19,8 +19,6 @@ def save_data(code, price):
     df = load_data()
     code = str(code).strip().upper()
     if not code: return 
-    
-    # ลบข้อมูลรหัสเดิมออก (ถ้ามี) แล้วเพิ่มตัวใหม่ที่มีราคาล่าสุดเข้าไปแทนที่
     df = df[df['code'] != code]
     new_entry = pd.DataFrame([{"code": code, "price": float(price)}])
     df = pd.concat([df, new_entry], ignore_index=True)
@@ -35,16 +33,14 @@ if 'master_data' not in st.session_state:
     st.session_state.master_data = load_data()
 
 # --- 3. ระบบ Login ---
-if 'auth' not in st.session_state:
-    st.session_state.auth = False
+if 'auth' not in st.session_state: st.session_state.auth = False
 
 if not st.session_state.auth:
     st.title("🔐 KK-Team Internal System")
     pw = st.text_input("กรุณาใส่รหัสผ่าน", type="password")
     if st.button("เข้าสู่ระบบ"):
         if pw == "KK-Team":
-            st.session_state.auth = True
-            st.rerun()
+            st.session_state.auth = True; st.rerun()
         else: st.error("รหัสไม่ถูกต้อง")
     st.stop()
 
@@ -58,7 +54,6 @@ def get_calculation_detail(price, discount_str):
         current_price *= (1 - float(d)/100)
     return current_price, calc_text
 
-# --- 5. ฐานข้อมูลเรทส่วนลด ---
 DB_RATES = {
     "1. LAN (UTP)": {"C": [1,3,5,10,20,30,50,100], "UT": "กล่อง", "R": ["10+10","10+10+2","10+10+3","10+10+5","10+10+5+2","10+10+5+3","10+10+5+5","10+10+5+5+5"]},
     "2. FIBER OPTIC": {"C": [1,500,1000,3000,5000,8000,10000,20000,30000], "UT": "เมตร", "R": ["10","10+5","10+10","10+10+3","10+10+5","10+10+5+3","10+10+5+5","10+10+5+5+3","10+10+5+5+5"]},
@@ -74,7 +69,11 @@ DB_RATES = {
 
 if 'cart' not in st.session_state: st.session_state.cart = []
 
-# --- 6. ส่วนหน้าจอแสดงผล (Tabs) ---
+# --- ฟังก์ชันช่วยเหลือสำหรับพิมพ์ปุ่มประวัติ ---
+def set_search_code(code):
+    st.session_state.search_code_input = code
+
+# --- 5. ส่วนหน้าจอแสดงผล (Tabs) ---
 tab1, tab2 = st.tabs(["🛒 เช็คราคา & คำนวณ", "⚙️ จัดการฐานข้อมูลสินค้า"])
 
 with tab1:
@@ -87,27 +86,29 @@ with tab1:
             st.session_state.master_data = load_data()
             codes_list = st.session_state.master_data['code'].tolist()
             
-            # --- แก้ไขให้เป็น 2 ชั้นเพื่อให้รองรับการพิมพ์รหัสใหม่ 100% ---
-            selected_history = st.selectbox("🔍 เลือกจากประวัติการค้นหา (ถ้ามี)", ["-- พิมพ์รหัสใหม่ด้านล่าง --"] + codes_list)
+            # 💥 1. ช่องป้อนรหัส (ช่องเดียวจบ!)
+            final_code = st.text_input("🔍 รหัสสินค้า (พิมพ์เพื่อหา หรือ เพิ่มของใหม่ได้เลย)", key="search_code_input").strip().upper()
             
-            default_code = ""
-            if selected_history != "-- พิมพ์รหัสใหม่ด้านล่าง --":
-                default_code = selected_history
-                
-            final_code = st.text_input("📝 รหัสสินค้า (กรอกใหม่ หรือ แก้ไขได้ที่นี่)", value=default_code).strip().upper()
+            # 💥 2. ระบบ Auto-suggest แสดงปุ่มกดเมื่อพิมพ์ตรงกับประวัติ
+            if final_code and final_code not in codes_list:
+                matches = [c for c in codes_list if final_code in c]
+                if matches:
+                    st.caption("💡 พบรหัสใกล้เคียงในระบบ (คลิกเพื่อเลือก):")
+                    btn_cols = st.columns(min(len(matches), 4)) # แสดงสูงสุด 4 ปุ่ม
+                    for i, m in enumerate(matches[:4]):
+                        btn_cols[i].button(m, on_click=set_search_code, args=(m,), use_container_width=True)
             
             cat = st.selectbox("หมวดหมู่สินค้า", list(DB_RATES.keys()))
             mode = st.radio("ประเภท", ["สินค้า (Cable)", "อุปกรณ์ (Conn/Acc)"], horizontal=True)
 
         with col2:
-            # ดึงราคาตั้งมาโชว์อัตโนมัติ ถ้ามีรหัสนี้ในฐานข้อมูล
+            # ดึงราคาตั้งมาโชว์อัตโนมัติ 
             auto_price = 0.0
             if final_code and (final_code in codes_list):
                 match = st.session_state.master_data[st.session_state.master_data['code'] == final_code]
                 if not match.empty:
                     auto_price = float(match.iloc[0]['price'])
             
-            # เมื่อดึงมาแล้ว คุณดนย์สามารถลบแก้ตรงนี้ได้เลย พอแก้ปุ๊บกดบันทึก มันจะทับของเก่าทันที
             list_p = st.number_input("ราคาตั้ง (List Price)", min_value=0.0, value=auto_price, step=10.0, format="%.2f")
             qty = st.number_input("จำนวนที่สั่งซื้อ", min_value=1, step=1)
 
@@ -118,9 +119,9 @@ with tab1:
             if not final_code:
                 st.warning("⚠️ กรุณากรอกรหัสสินค้าก่อนคำนวณ")
             else:
-                # 💥 หัวใจสำคัญ: บันทึกข้อมูลหรือเขียนทับราคาใหม่ลง Database ทันที
+                # บันทึกหรือเขียนทับราคาลง Database ทันที
                 save_data(final_code, list_p)
-                st.session_state.master_data = load_data() # โหลดข้อมูลใหม่ให้ระบบจำทันที
+                st.session_state.master_data = load_data()
                 
                 data = DB_RATES[cat]
                 idx = 0
